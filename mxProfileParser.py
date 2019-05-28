@@ -1,98 +1,88 @@
 import json
 import argparse
+from collections import defaultdict
+import sys
 
 
 def add_args(parser):
     parser.add_argument("--file",
                         help="profile json file", default="profile.json")
-    parser.add_argument("--op", help="operator need to anlyze", default="all")
-    parser.add_argument("--iterations",
-                        help="number of iteration, including warm up",
-                        default=0, type=int)
+    parser.add_argument("--full", action='store_true',
+                        help="whether to dump full statistics along iteration perspective")
+    parser.add_argument("--iteration", default=0, type=int,
+                        help="whether to dump full statistics along iteration perspective")
+    parser.add_argument("--op", default='conv', type=str,
+                        help="Which opeator to be dumped")
 
 
-def parse_all(events, ops, cnt, dur):
-    assert isinstance(events, list)
-    for i in range(len(events)):
-        if events[i]['name'] in ops:
-            name = events[i]['name']
-            if events[i]['ph'] == 'B' and \
-               events[i+1]['name'] == name and \
-               events[i+1]['ph'] == 'E':
-                cnt[str(name)] += 1
-                dur[str(name)] += events[i+1]['ts'] - events[i]['ts']
+def print_op_detail(cnt, dur, dur_list, name='conv', iteration=0):
+    print ('opeator')
+    print ('=' * 20)
 
-    return ops, cnt, dur
+    if (iteration <= 0):
+        print ('ERROR: `iteration` must be specified when full mode is enabled.')
+        sys.exit(0)
+
+    if (len(dur_list) < 3):
+        print ('ERROR: full mode requires more than 3 iterations statistics.')
+        sys.exit(0)
+
+    assert (name in cnt.keys())
+
+    print ('{0: <38} {1: >16} {2: >16} {3: >16} {4: >16} {5: >16} '.format(
+      'Name', 'Layer', '1st Time (ms)', '2nd Time (ms)', '3rd Time (ms)', 'Rest Time (ms)'))
+
+    print ('{0: <38} {1: >16} {2: >16} {3: >16} {4: >16} {5: >16} '.format(
+      '----', '-----', '-------------', '-------------', '-------------', '--------------'))
+
+    total_count = cnt[name]
+    total_time = dur[name] / 1000.0
+    assert (total_count % iteration == 0)
+
+    layer_num = total_count // iteration
+
+    for i in range(layer_num):
+        first_iter_ms = dur_list[name][i] / 1000.0
+        second_iter_ms = dur_list[name][i + layer_num] / 1000.0
+        third_iter_ms = dur_list[name][i + 2 * layer_num] / 1000.0
+
+        rest_iter_dur = dur_list[name][(i + 3 * layer_num) : : layer_num]
+        rest_iter_time_ms = sum(rest_iter_dur) / len(rest_iter_dur) / 1000.0
+
+        print ('{0: <38} {1:16d} {2:16.3f} {3:16.3f} {4:16.3f} {5:16.3f} '.format(
+          name, i, first_iter_ms, second_iter_ms, third_iter_ms, rest_iter_time_ms))
+
+    print('\nTotal Time: {0:.3f}ms, Average Time: {1:.3f}ms'.format(
+      total_time, total_time / total_count))
 
 
-def print_all(cnt, dur, iters=0):
-    print('Time of each OP:')
-    oplen = [len(v) for v in cnt.keys()]
-    maxname = max(oplen)
-    maxtotal = max([len(str(v / 1000.0)) for v in dur.values()])
-    maxpercall = max([len(str(dur[v] / 1000.0 / cnt[v])) for v in dur.keys()])
-    maxcall = max([len(str(v)) for v in cnt.values()])
+def print_all(cnt, dur, dur_list):
+    print ('opeator')
+    print ('=' * 20)
+
+    print ('{0: <38} {1: >16} {2: >16} {3: >16} {4: >16} {5: >16} {6: >16}'.format(
+      'Name', 'Total Count', 'Time (ms)', 'Min Time (ms)', 'Max Time (ms)', 'Avg Time (ms)',
+      'Percentage'))
+    print ('{0: <38} {1: >16} {2: >16} {3: >16} {4: >16} {5: >16} {6: >16}'.format(
+      '----', '-----------', '---------', '-------------', '-------------', '-------------',
+      '----------'))
 
     sorted_dur = sorted(dur.items(), key=lambda kv: kv[1], reverse=True)
 
     total_time = sum(dur.values())
     for i in range(len(cnt)):
         name = sorted_dur[i][0]
-        if iters != 0:
-            assert cnt[name] % iters == 0
-            str1 = ('%%-%ds' % maxname) % name
-            str2 = ('%%-%ds ms' % maxtotal) % (dur[name] / 1000.0)
-            str3 = ('%%-%ds ms/call' % maxpercall) % \
-                (dur[name] / 1000.0 / cnt[name])
-            str4 = ('%%-%ds calls' % maxcall) % cnt[name]
-            str5 = '%-4s calls/iter' % (cnt[name] / iters)
-            str6 = ('{0:.2f} %'.format(100.0 * dur[name]/total_time))
-            print('%s  %s \t%s \t%s \t%s \t%s' % (str1, str2, str3, str4, str5, str6))
-        else:
-            str1 = ('%%-%ds' % maxname) % name
-            str2 = ('%%-%ds ms' % maxtotal) % (dur[name] / 1000.0)
-            str3 = ('%%-%ds ms/call' % maxpercall) % \
-                (dur[name] / 1000.0 / cnt[name])
-            str4 = ('%%-%ds calls' % maxcall) % cnt[name]
-            str5 = ('{0:.2f} %'.format(100.0 * dur[name]/total_time))
-            print('%s  %s \t%s \t%s \t%s' % (str1, str2, str3, str4, str5))
+        total_count = cnt[name]
+        time_ms = dur[name] / 1000.0
+        min_time_ms = min(dur_list[name]) / 1000.0
+        max_time_ms = max(dur_list[name]) / 1000.0
+        avg_time_ms = time_ms / cnt[name]
+        percentage = 100.0 * dur[name] / total_time
 
-    print('\nTotal OP Time: %.8f ms' % (total_time / 1000.0))
-    if iters != 0:
-        print('Iteration Time: %.8f ms\n' %
-              (sum(dur.values()) / 1000.0 / iters))
+        print ('{0: <38} {1: >16} {2:16.3f} {3:16.3f} {4:16.3f} {5:16.3f} {6:15.2f}%'.format(
+          name, total_count, time_ms, min_time_ms, max_time_ms, avg_time_ms, percentage))
 
-
-def print_op(op, cnt, dur, iters=0):
-    print('Time of %s:' % op)
-    oplen = [len(v) for v in cnt.keys()]
-    maxname = max(oplen)
-    maxtotal = max([len(str(v / 1000.0)) for v in dur.values()])
-    maxpercall = max([len(str(dur[v] / 1000.0 / cnt[v])) for v in dur.keys()])
-    maxcall = max([len(str(v)) for v in cnt.values()])
-
-    total_time = sum(dur.values())
-    for i in range(len(cnt)):
-        name = list(cnt.keys())[i]
-        if op in name:
-            if iters != 0:
-                assert cnt[name] % iters == 0
-                str1 = ('%%-%ds' % maxname) % name
-                str2 = ('%%-%ds ms' % maxtotal) % (dur[name] / 1000.0)
-                str3 = ('%%-%ds ms/call' % maxpercall) % \
-                    (dur[name] / 1000.0 / cnt[name])
-                str4 = ('%%-%ds calls' % maxcall) % cnt[name]
-                str5 = '%-4s calls/iter' % (cnt[name] / iters)
-                str6 = ('{0:.2f} %'.format(100.0 * dur[name]/total_time))
-                print('%s  %s \t%s \t%s \t%s \t%s' % (str1, str2, str3, str4, str5, str6))
-            else:
-                str1 = ('%%-%ds' % maxname) % name
-                str2 = ('%%-%ds ms' % maxtotal) % (dur[name] / 1000.0)
-                str3 = ('%%-%ds ms/call' % maxpercall) % \
-                    (dur[name] / 1000.0 / cnt[name])
-                str4 = ('%%-%ds calls' % maxcall) % cnt[name]
-                str5 = ('{0:.2f} %'.format(100.0 * dur[name]/total_time))
-                print('%s  %s \t%s \t%s \t%s' % (str1, str2, str3, str4, str5))
+    print('\nTotal OP Time: %.3f ms' % (total_time / 1000.0))
 
 
 def init_table(events):
@@ -112,6 +102,23 @@ def init_table(events):
     return ops, cnt, dur
 
 
+def parse_all(events, ops, cnt, dur):
+    assert isinstance(events, list)
+    dur_list = defaultdict(list)
+    for i in range(len(events)):
+        if events[i]['name'] in ops:
+            name = events[i]['name']
+            if events[i]['ph'] == 'B' and \
+               events[i+1]['name'] == name and \
+               events[i+1]['ph'] == 'E':
+                cnt[str(name)] += 1
+                time_us = events[i+1]['ts'] - events[i]['ts']
+                dur[str(name)] += time_us
+                dur_list[str(name)].append(time_us)
+
+    return ops, cnt, dur, dur_list
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="mxnet profile file analysis",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter) # noqa
@@ -122,8 +129,12 @@ if __name__ == "__main__":
     e = j['traceEvents']
 
     ops, cnt, dur = init_table(e)
-    parse_all(e, ops, cnt, dur)
-    if args.op == 'all':
-        print_all(cnt, dur, args.iterations)
+    ops, cnt, dur, dur_list = parse_all(e, ops, cnt, dur)
+
+    if args.full is True:
+        if args.op not in cnt:
+            print ('ERROR: \'{0}\' is not in the list. You may want to select one of the following '
+                   'ones {1}'.format(args.op, tuple(cnt.keys())))
+        print_op_detail(cnt, dur, dur_list, args.op, args.iteration)
     else:
-        print_op(args.op, cnt, dur, args.iterations)
+        print_all(cnt, dur, dur_list)
