@@ -61,7 +61,7 @@ def print_all(cnt, dur, dur_list):
     print ('=' * 20)
 
     print ('{0: <38} {1: >16} {2: >16} {3: >16} {4: >16} {5: >16} {6: >16}'.format(
-      'Name', 'Total Count', 'Time (ms)', 'Min Time (ms)', 'Max Time (ms)', 'Avg Time (ms)',
+      'Name', 'TotalCount', 'Time(ms)', 'MinTime(ms)', 'MaxTime(ms)', 'AvgTime(ms)',
       'Percentage'))
     print ('{0: <38} {1: >16} {2: >16} {3: >16} {4: >16} {5: >16} {6: >16}'.format(
       '----', '-----------', '---------', '-------------', '-------------', '-------------',
